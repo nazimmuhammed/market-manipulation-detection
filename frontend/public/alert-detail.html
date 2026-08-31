@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Alert Detail</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #070b14;
+    color: #c8d3e6;
+    font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+    padding: 32px;
+  }
+  .card {
+    max-width: 720px;
+    margin: 0 auto;
+    background: #0d1220;
+    border: 1px solid #1c2436;
+    border-radius: 10px;
+    padding: 24px 28px;
+  }
+  h1 { font-size: 20px; color: #e8edf5; margin: 0 0 4px; }
+  .subtitle { color: #6b7a94; font-size: 13px; margin-bottom: 20px; }
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin: 14px 0 20px;
+  }
+  .detail-grid div { background: #1a1e2e; padding: 10px 12px; border-radius: 6px; }
+  .detail-grid span { display: block; color: #6b7a94; font-size: 11px; margin-bottom: 4px; }
+  .detail-grid b { color: #e8edf5; font-size: 13px; }
+  .risk-low b { color: #00e676; }
+  .risk-medium b { color: #ffb800; }
+  .risk-high b { color: #ff8f1f; }
+  .risk-critical b { color: #ff1744; }
+  .section { margin-top: 20px; padding-top: 16px; border-top: 1px solid #1c2436; }
+  .section h3 { color: #00ff9d; font-size: 14px; margin: 0 0 10px; }
+  .section p { font-size: 13px; color: #a8b5cc; margin: 6px 0; }
+  .explain-bar-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 12px; }
+  .explain-bar-row span:first-child { width: 160px; }
+  .explain-bar-bg { flex: 1; background: #1a1e2e; height: 16px; border-radius: 4px; overflow: hidden; }
+  .explain-bar-fill { background: #00ff9d; height: 100%; }
+  .report-text {
+    white-space: pre-wrap;
+    font-size: 12px;
+    color: #ccc;
+    background: #1a1e2e;
+    padding: 12px;
+    border-radius: 6px;
+    margin-top: 8px;
+  }
+  .loading, .error { color: #6b7a94; text-align: center; padding: 40px; }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div class="loading">Loading alert details...</div>
+  </div>
+
+  <script>
+    const API = 'http://127.0.0.1:8000';
+    const params = new URLSearchParams(window.location.search);
+    const alertId = params.get('id');
+    const card = document.getElementById('card');
+
+    if (!alertId) {
+      card.innerHTML = '<div class="error">No alert ID provided.</div>';
+    } else {
+      loadAlert(alertId);
+    }
+
+    async function loadAlert(id) {
+      try {
+        const [alertsRes, explainRes, breakdownRes, reportRes] = await Promise.all([
+          fetch(`${API}/api/alerts?limit=200`).then(r => r.json()),
+          fetch(`${API}/api/scenario-explanation/${id}`).then(r => r.json()),
+          fetch(`${API}/api/explain/${id}`).then(r => r.json()),
+          fetch(`${API}/api/regulatory-report/${id}`).then(r => r.json()),
+        ]);
+
+        const alert = alertsRes.find(a => String(a.alert_id) === String(id));
+        if (!alert) {
+          card.innerHTML = '<div class="error">Alert not found.</div>';
+          return;
+        }
+
+        const riskClass = `risk-${(alert.risk_level || 'low').toLowerCase()}`;
+
+        let breakdownHtml = '';
+        if (breakdownRes.breakdown && breakdownRes.breakdown.length > 0) {
+          breakdownHtml = `
+            <div class="section">
+              <h3>HOW the score was computed</h3>
+              ${breakdownRes.breakdown.map(m => `
+                <div class="explain-bar-row">
+                  <span>${m.model.replace(/_/g, ' ')}</span>
+                  <div class="explain-bar-bg">
+                    <div class="explain-bar-fill" style="width:${m.percent}%"></div>
+                  </div>
+                  <span>${m.percent}%</span>
+                </div>
+              `).join('')}
+            </div>`;
+        }
+
+        card.innerHTML = `
+          <h1>Alert #${alert.alert_id} — ${alert.ticker}</h1>
+          <p class="subtitle">Detected ${alert.alert_timestamp || 'N/A'}</p>
+
+          <div class="detail-grid">
+            <div><span>TYPE</span><b>${alert.alert_type}</b></div>
+            <div class="${riskClass}"><span>RISK</span><b>${alert.risk_level} (${alert.composite_score}/100)</b></div>
+            <div><span>STATUS</span><b>${alert.status}</b></div>
+            <div><span>ALERT ID</span><b>#${alert.alert_id}</b></div>
+          </div>
+
+          <div class="section">
+            <h3>🔍 Why This Was Flagged</h3>
+            <p><b>Reason:</b> ${explainRes.why || 'N/A'}</p>
+            <p><b>Immediate Issue:</b> ${explainRes.immediate_issue || 'N/A'}</p>
+            <p><b>Recommended Action:</b> ${explainRes.recommended_action || 'N/A'}</p>
+          </div>
+
+          ${breakdownHtml}
+
+          <div class="section">
+            <h3>📄 Full Regulatory Report</h3>
+            <div class="report-text">${(reportRes.report || 'Unavailable').replace(/</g, '&lt;')}</div>
+          </div>
+        `;
+      } catch (e) {
+        card.innerHTML = '<div class="error">Failed to load alert details. Is the backend running?</div>';
+        console.error(e);
+      }
+    }
+  </script>
+</body>
+</html>
